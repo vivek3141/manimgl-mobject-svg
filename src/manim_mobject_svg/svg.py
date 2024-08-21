@@ -7,8 +7,10 @@ from pathlib import Path
 
 import cairo
 import numpy as np
-from manim import VGroup, VMobject
-from manim.utils.family import extract_mobject_family_members
+
+from manimlib import VGroup, VMobject
+from manimlib.utils.family_ops import extract_mobject_family_members
+from manimlib.utils.color import hex_to_rgb
 
 CAIRO_LINE_WIDTH_MULTIPLE: float = 0.01
 
@@ -64,7 +66,7 @@ def _transform_points_pre_display(points: np.ndarray) -> np.ndarray:
 
 
 def _get_stroke_rgbas(vmobject: VMobject, background: bool = False):
-    return vmobject.get_stroke_rgbas(background)
+    return [hex_to_rgb(vmobject.get_stroke_color())]
 
 
 def _set_cairo_context_color(
@@ -90,7 +92,7 @@ def _set_cairo_context_color(
 def _apply_stroke(ctx: cairo.Context, vmobject: VMobject, background: bool = False):
     from manim import config
 
-    width = vmobject.get_stroke_width(background)
+    width = vmobject.get_stroke_width()
     if width == 0:
         return
     _set_cairo_context_color(
@@ -124,7 +126,7 @@ def _apply_fill(ctx: cairo.Context, vmobject: VMobject):
     """
     _set_cairo_context_color(
         ctx,
-        vmobject.get_fill_rgbas(),
+        [hex_to_rgb(vmobject.get_fill_color())],
         vmobject,
     )
     ctx.fill_preserve()
@@ -133,20 +135,20 @@ def _apply_fill(ctx: cairo.Context, vmobject: VMobject):
 
 def _create_svg_from_vmobject_internal(vmobject: VMobject, ctx: cairo.Content):
     # check if points are valid
-    points = vmobject.points
+    points = vmobject.data["points"]
     points = _transform_points_pre_display(points)
     if len(points) == 0:
         return
     ctx.new_path()
-    subpaths = vmobject.gen_subpaths_from_points_2d(points)
+    subpaths = vmobject.get_subpaths_from_points(points)
     for subpath in subpaths:
-        quads = vmobject.gen_cubic_bezier_tuples_from_points(subpath)
+        quads = vmobject.get_bezier_tuples_from_points(subpath)
         ctx.new_sub_path()
         start = subpath[0]
         ctx.move_to(*start[:2])
-        for _p0, p1, p2, p3 in quads:
+        for p1, p2, p3 in quads:
             ctx.curve_to(*p1[:2], *p2[:2], *p3[:2])
-        if vmobject.consider_points_equals_2d(subpath[0], subpath[-1]):
+        if vmobject.consider_points_equals(subpath[0], subpath[-1]):
             ctx.close_path()
 
     _apply_stroke(ctx, vmobject, background=True)
@@ -188,7 +190,7 @@ def create_svg_from_vmobject(
     if crop:
         width, height = vmobject.width + padding, vmobject.height + padding
     with _get_cairo_context(file_name, width=width, height=height) as ctx:
-        for _vmobject in extract_mobject_family_members([vmobject], True, True):
+        for _vmobject in extract_mobject_family_members([vmobject], True):
             _create_svg_from_vmobject_internal(_vmobject, ctx)
     return file_name
 
@@ -224,11 +226,11 @@ def create_svg_from_vgroup(
     file_name = Path(file_name).absolute()
     width, height = None, None
     if crop:
-        width, height = vgroup.width + padding, vgroup.height + padding
+        width, height = vgroup.get_width() + padding, vgroup.get_height() + padding
     with _get_cairo_context(file_name, width=width, height=height) as ctx:
         # a vgroup is a list of VMobjects which may contain other VGroups
         # flatten the vgroup to get a list of VMobjects
-        vgroup = extract_mobject_family_members(vgroup, True, True)
+        vgroup = extract_mobject_family_members(vgroup, True)
         for vmobject in vgroup:
             _create_svg_from_vmobject_internal(vmobject, ctx)
     return file_name
